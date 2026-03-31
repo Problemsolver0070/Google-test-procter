@@ -175,10 +175,6 @@
       if (document.hidden) terminate();
     });
 
-    window.addEventListener("blur", function () {
-      terminate();
-    });
-
     window.addEventListener("pagehide", function () {
       terminate();
     });
