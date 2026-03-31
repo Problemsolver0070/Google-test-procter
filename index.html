@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Proctored Test</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  #start-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding: 2rem;
+    background: #f5f5f5;
+    text-align: center;
+  }
+
+  #start-screen h1 {
+    font-size: 1.6rem;
+    margin-bottom: 1.5rem;
+    color: #1a1a1a;
+  }
+
+  #start-screen .warning {
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 2rem;
+    max-width: 500px;
+    color: #664d03;
+    font-size: 0.95rem;
+    line-height: 1.5;
+  }
+
+  #start-btn {
+    background: #1a73e8;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 1rem 2.5rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  #start-btn:active { background: #1557b0; }
+
+  #test-screen {
+    display: none;
+    height: 100%;
+    width: 100%;
+  }
+
+  #test-screen iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+  }
+
+  #terminated-screen {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding: 2rem;
+    background: #dc3545;
+    text-align: center;
+    color: #fff;
+  }
+
+  #terminated-screen h1 {
+    font-size: 2rem;
+    margin-bottom: 1rem;
+  }
+
+  #terminated-screen p {
+    font-size: 1.1rem;
+    opacity: 0.9;
+    max-width: 400px;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<div id="start-screen">
+  <h1>Proctored Test</h1>
+  <div class="warning">
+    <strong>Read carefully:</strong> Once you start, do NOT leave this page.
+    Do not switch tabs, switch apps, minimize the browser, or pull down
+    the notification shade. If you leave for any reason, your test will be
+    permanently cancelled. There are no second chances.
+  </div>
+  <button id="start-btn">Start Test</button>
+</div>
+
+<div id="test-screen"></div>
+
+<div id="terminated-screen">
+  <h1>Test Terminated</h1>
+  <p>You left the page during the test. Your session has been permanently cancelled.</p>
+</div>
+
+<script>
+(function () {
+  // ─── CONFIG ───────────────────────────────────────────────
+  var FALLBACK_FORM_URL = "https://docs.google.com/forms/d/e/YOUR_FORM_ID/viewform";
+
+  // ─── RESOLVE FORM URL ─────────────────────────────────────
+  var params = new URLSearchParams(window.location.search);
+  var formURL = params.get("form") || FALLBACK_FORM_URL;
+  var storageKey = "terminated_" + formURL;
+
+  // ─── DOM ──────────────────────────────────────────────────
+  var startScreen = document.getElementById("start-screen");
+  var testScreen = document.getElementById("test-screen");
+  var terminatedScreen = document.getElementById("terminated-screen");
+  var startBtn = document.getElementById("start-btn");
+
+  // ─── CHECK PRIOR TERMINATION ──────────────────────────────
+  if (sessionStorage.getItem(storageKey)) {
+    showTerminated();
+    return;
+  }
+
+  // ─── STATE ────────────────────────────────────────────────
+  var testActive = false;
+  var fullscreenWasActive = false;
+
+  // ─── START ────────────────────────────────────────────────
+  startBtn.addEventListener("click", function () {
+    startScreen.style.display = "none";
+    testScreen.style.display = "block";
+
+    var iframe = document.createElement("iframe");
+    iframe.src = formURL;
+    iframe.setAttribute("allow", "fullscreen");
+    iframe.setAttribute("sandbox", "allow-forms allow-scripts allow-same-origin allow-popups");
+    testScreen.appendChild(iframe);
+
+    // Request fullscreen (best-effort)
+    var el = document.documentElement;
+    var rfs = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+    if (rfs) {
+      rfs.call(el).then(function () {
+        fullscreenWasActive = true;
+      }).catch(function () {
+        // Fullscreen denied or unsupported — continue without it
+      });
+    }
+
+    testActive = true;
+    attachProctoring();
+  });
+
+  // ─── PROCTORING ───────────────────────────────────────────
+  function attachProctoring() {
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) terminate();
+    });
+
+    window.addEventListener("blur", function () {
+      terminate();
+    });
+
+    window.addEventListener("pagehide", function () {
+      terminate();
+    });
+
+    window.addEventListener("beforeunload", function () {
+      terminate();
+    });
+
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", onFullscreenChange);
+  }
+
+  function onFullscreenChange() {
+    var isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    if (fullscreenWasActive && !isFullscreen) {
+      terminate();
+    }
+  }
+
+  // ─── TERMINATE ────────────────────────────────────────────
+  function terminate() {
+    if (!testActive) return;
+    testActive = false;
+
+    // Destroy iframe
+    var iframe = testScreen.querySelector("iframe");
+    if (iframe) iframe.remove();
+
+    sessionStorage.setItem(storageKey, "1");
+    showTerminated();
+  }
+
+  function showTerminated() {
+    startScreen.style.display = "none";
+    testScreen.style.display = "none";
+    terminatedScreen.style.display = "flex";
+  }
+
+  // ─── DISABLE RIGHT-CLICK ─────────────────────────────────
+  document.addEventListener("contextmenu", function (e) {
+    e.preventDefault();
+  });
+})();
+</script>
+
+</body>
+</html>
